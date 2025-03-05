@@ -190,6 +190,33 @@ fn read_input(prompt: &str, buf: &mut String) -> usize {
     }
 }
 
+/**
+ * Planned to return a Result type before, which would look "nice"
+ * but printing errors get's complicated
+ */
+fn execute_cd_comm(comm: &str) -> Option<()> {
+    let path: String;
+    let tokens = tokenize_comm(comm);
+    if tokens.len() > 2 {
+        eprintln!("rush: cd: too many arguments");
+        return None;
+    }
+    else if tokens.len() < 2 {
+        path = std::env::var("HOME").unwrap_or("/".to_string());
+    }
+    else {
+        path = tokens[1].clone();
+    }
+
+    match std::env::set_current_dir(path) {
+        Err(e) => {
+            eprintln!("rush: cd: {e}");
+            None
+        }
+        _ => Some(())
+    }
+}
+
 fn _print_tokens(comms: &Vec<String>) {
 
     for comm in comms {
@@ -226,8 +253,25 @@ fn main() {
         let sub_comms: Vec<String> = split_subcommands(line);
         let mut prev_out = None;
 
+        if sub_comms.len() == 1 {
+            if sub_comms[0].starts_with("exit") {
+                break 'repl;
+            }
+
+            else if sub_comms[0].starts_with("cd") {
+                if execute_cd_comm(&sub_comms[0]).is_some() {
+                    get_prompt_string(&mut prompt);
+                }
+                continue 'repl;
+            }
+        }
+
         for (i, comm) in sub_comms.iter().enumerate() {
             let tokens = tokenize_comm(&comm);
+
+            if tokens[0] == "cd"  || tokens[0] == "exit" {
+                continue;
+            }
 
             if let Some((comm, args)) = tokens.split_first() {
                 let stdin: Stdio;
