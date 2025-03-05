@@ -1,7 +1,9 @@
 use libc::{c_int, signal, SIGINT};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::process::{Command, Stdio};
 use std::{env, fs};
+
+static mut READ_MODE: bool = false;
 
 fn get_prompt_string(prompt: &mut String) {
     prompt.clear();
@@ -48,6 +50,12 @@ fn get_prompt_string(prompt: &mut String) {
 }
 
 extern "C" fn handle_sigint(_sig: c_int) {
+    unsafe {
+        if READ_MODE == false {
+            return;
+        }
+    }
+
     let mut prompt: String = String::new();
     get_prompt_string(&mut prompt);
     print!("\n{prompt}$ ");
@@ -68,7 +76,7 @@ fn tokenize_comm(comm: &str) -> Vec<String> {
     'outer: loop {
         match chars.peek() {
             None => {
-                if start < ind {
+                if start <= ind {
                     tokens.push(comm[start..=ind].to_string());
                 }
                 break 'outer;
@@ -118,7 +126,7 @@ fn split_subcommands(line: &str) -> Vec<String> {
     'outer: loop {
         match chars.peek() {
             None => {
-                if start < ind {
+                if start <= ind {
                     subcomms.push(line[start..=ind].to_string());
                 }
                 break 'outer;
@@ -135,7 +143,9 @@ fn split_subcommands(line: &str) -> Vec<String> {
                     chars.next();
                     continue 'outer;
                 }
-                subcomms.push(line[start..ind].to_string());
+                if start < ind {
+                    subcomms.push(line[start..ind].to_string());
+                }
                 start = ind + 1;
             }
             '"' | '\'' => {
@@ -162,12 +172,33 @@ fn read_input(prompt: &str, buf: &mut String) -> usize {
         _ => {}
     }
 
+    unsafe {
+        READ_MODE = true;
+    }
+
     match io::stdin().read_line(buf) {
         Err(e) => {
             println!("{e}");
             0
         }
-        Ok(len) => len,
+        Ok(len) => {
+            unsafe {
+                READ_MODE = false;
+            }
+            len
+        }
+    }
+}
+
+fn _print_tokens(comms: &Vec<String>) {
+
+    for comm in comms {
+        println!("#{}#", comm);
+        let tokens = tokenize_comm(&comm);
+
+        for token in tokens {
+            println!(".{}.", token);
+        }
     }
 }
 
