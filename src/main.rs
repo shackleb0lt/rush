@@ -1,5 +1,6 @@
 use libc::{c_int, signal, SIGINT};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
+use std::process::{Command, Stdio};
 use std::{env, fs};
 
 fn get_prompt_string(prompt: &mut String) {
@@ -55,9 +56,9 @@ extern "C" fn handle_sigint(_sig: c_int) {
     }
 }
 
-fn tokenize_comm(line: &str) -> Vec<String> {
+fn tokenize_comm(comm: &str) -> Vec<String> {
     let mut tokens: Vec<String> = Vec::new();
-    let mut chars = line.char_indices().peekable();
+    let mut chars = comm.char_indices().peekable();
 
     let mut ch: char;
     let mut ind: usize = 0;
@@ -68,7 +69,7 @@ fn tokenize_comm(line: &str) -> Vec<String> {
         match chars.peek() {
             None => {
                 if start < ind {
-                    tokens.push(line[start..=ind].to_string());
+                    tokens.push(comm[start..=ind].to_string());
                 }
                 break 'outer;
             }
@@ -82,13 +83,13 @@ fn tokenize_comm(line: &str) -> Vec<String> {
             ' ' | '\t' => {
                 if is_quote {
                     chars.next();
-                    continue;
+                    continue 'outer;
                 } else if start == ind {
                     start = ind + 1;
                     chars.next();
-                    continue;
+                    continue 'outer;
                 }
-                tokens.push(line[start..ind].to_string());
+                tokens.push(comm[start..ind].to_string());
                 start = ind + 1;
             }
 
@@ -105,7 +106,7 @@ fn tokenize_comm(line: &str) -> Vec<String> {
 }
 
 fn split_subcommands(line: &str) -> Vec<String> {
-    let mut subcoms: Vec<String> = Vec::new();
+    let mut subcomms: Vec<String> = Vec::new();
     let mut chars = line.char_indices().peekable();
 
     let mut ch: char;
@@ -118,8 +119,7 @@ fn split_subcommands(line: &str) -> Vec<String> {
         match chars.peek() {
             None => {
                 if start < ind {
-                    subcoms.push(line[start..=ind].to_string());
-                    tokenize_comm(&line[start..=ind]);
+                    subcomms.push(line[start..=ind].to_string());
                 }
                 break 'outer;
             }
@@ -133,10 +133,9 @@ fn split_subcommands(line: &str) -> Vec<String> {
             '|' => {
                 if is_quote {
                     chars.next();
-                    continue;
+                    continue 'outer;
                 }
-                subcoms.push(line[start..ind].to_string());
-                tokenize_comm(&line[start..ind]);
+                subcomms.push(line[start..ind].to_string());
                 start = ind + 1;
             }
             '"' | '\'' => {
@@ -147,7 +146,7 @@ fn split_subcommands(line: &str) -> Vec<String> {
         chars.next();
     }
 
-    subcoms
+    subcomms
 }
 
 fn read_input(prompt: &str, buf: &mut String) -> usize {
@@ -182,17 +181,58 @@ fn main() {
 
     get_prompt_string(&mut prompt);
 
-    loop {
+    'repl: loop {
         if read_input(&prompt, &mut buf) == 0 {
             println!("");
-            break;
+            break 'repl;
         }
 
         let line: &str = buf.trim();
         if line.len() == 0 {
-            continue;
+            continue 'repl;
         }
 
-        let _sub_coms: Vec<String> = split_subcommands(line);
+        let sub_comms: Vec<String> = split_subcommands(line);
+        let mut prev_out = None;
+
+        for (i, comm) in sub_comms.iter().enumerate() {
+            let tokens = tokenize_comm(&comm);
+
+            if let Some((comm, args)) = tokens.split_first() {
+                let stdin: Stdio;
+                let stdout: Stdio;
+
+                match prev_out.take() {
+                    Some(out) => {
+                        stdin = Stdio::from(out);
+                    }
+                    None => {
+                        stdin = Stdio::inherit();
+                    }
+                }
+
+                if i == sub_comms.len() - 1 {
+                    stdout = Stdio::inherit();
+                } else {
+                    stdout = Stdio::piped();
+                }
+
+                let child = Command::new(comm)
+                    .args(args)
+                    .stdin(stdin)
+                    .stdout(stdout)
+                    .spawn();
+
+                match child {
+                    Ok(mut proc) => {
+                        prev_out = proc.stdout.take();
+                        let _ = proc.wait();
+                    }
+                    Err(e) => {
+                        eprintln!("{e}");
+                    }
+                }
+            }
+        }
     }
 }
