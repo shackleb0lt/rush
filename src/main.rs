@@ -1,18 +1,16 @@
 use libc::{c_int, signal, SIGINT};
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{env, fs};
 
-static mut READ_MODE: bool = false;
+static READ_MODE: AtomicBool = AtomicBool::new(false);
+static BLUE: &str = "\x1b[1;34m";
+static GREEN: &str = "\x1b[1;32m";
+static RESET: &str = "\x1b[0m";
 
-fn get_prompt_string(prompt: &mut String) {
-    prompt.clear();
-
-    let blue: &str = "\x1b[1;34m";
-    let green: &str = "\x1b[1;32m";
-    let reset: &str = "\x1b[0m";
-
-    prompt.push_str(green);
+fn get_prompt_string() -> String {
+    let mut prompt: String = String::from(GREEN);
 
     match env::var("USER") {
         Ok(user) => {
@@ -20,7 +18,8 @@ fn get_prompt_string(prompt: &mut String) {
             prompt.push('@');
         }
         Err(_) => {
-            return;
+            prompt.clear();
+            return prompt;
         }
     }
 
@@ -31,10 +30,11 @@ fn get_prompt_string(prompt: &mut String) {
         }
         Err(_) => {
             prompt.clear();
-            return;
+            return prompt;
         }
     }
-    prompt.push_str(blue);
+
+    prompt.push_str(BLUE);
 
     match env::current_dir() {
         Ok(path) => {
@@ -43,21 +43,20 @@ fn get_prompt_string(prompt: &mut String) {
         }
         Err(_) => {
             prompt.clear();
-            return;
+            return prompt;
         }
     }
-    prompt.push_str(reset);
+    prompt.push_str(RESET);
+
+    prompt
 }
 
 extern "C" fn handle_sigint(_sig: c_int) {
-    unsafe {
-        if READ_MODE == false {
-            return;
-        }
+    if !READ_MODE.load(Ordering::SeqCst) {
+        return;
     }
 
-    let mut prompt: String = String::new();
-    get_prompt_string(&mut prompt);
+    let prompt = get_prompt_string();
     print!("\n{prompt}$ ");
     match io::stdout().flush() {
         _ => {}
@@ -172,9 +171,7 @@ fn read_input(prompt: &str, buf: &mut String) -> usize {
         _ => {}
     }
 
-    unsafe {
-        READ_MODE = true;
-    }
+    READ_MODE.store(true, Ordering::SeqCst);
 
     match io::stdin().read_line(buf) {
         Err(e) => {
@@ -182,9 +179,7 @@ fn read_input(prompt: &str, buf: &mut String) -> usize {
             0
         }
         Ok(len) => {
-            unsafe {
-                READ_MODE = false;
-            }
+            READ_MODE.store(false, Ordering::SeqCst);
             len
         }
     }
@@ -200,11 +195,9 @@ fn execute_cd_comm(comm: &str) -> Option<()> {
     if tokens.len() > 2 {
         eprintln!("rush: cd: too many arguments");
         return None;
-    }
-    else if tokens.len() < 2 {
+    } else if tokens.len() < 2 {
         path = std::env::var("HOME").unwrap_or("/".to_string());
-    }
-    else {
+    } else {
         path = tokens[1].clone();
     }
 
@@ -213,12 +206,11 @@ fn execute_cd_comm(comm: &str) -> Option<()> {
             eprintln!("rush: cd: {e}");
             None
         }
-        _ => Some(())
+        _ => Some(()),
     }
 }
 
 fn _print_tokens(comms: &Vec<String>) {
-
     for comm in comms {
         println!("#{}#", comm);
         let tokens = tokenize_comm(&comm);
@@ -235,9 +227,7 @@ fn main() {
     }
 
     let mut buf: String = String::new();
-    let mut prompt: String = String::new();
-
-    get_prompt_string(&mut prompt);
+    let mut prompt: String = get_prompt_string();
 
     'repl: loop {
         if read_input(&prompt, &mut buf) == 0 {
@@ -256,11 +246,9 @@ fn main() {
         if sub_comms.len() == 1 {
             if sub_comms[0].starts_with("exit") {
                 break 'repl;
-            }
-
-            else if sub_comms[0].starts_with("cd") {
+            } else if sub_comms[0].starts_with("cd") {
                 if execute_cd_comm(&sub_comms[0]).is_some() {
-                    get_prompt_string(&mut prompt);
+                    prompt = get_prompt_string();
                 }
                 continue 'repl;
             }
@@ -269,7 +257,7 @@ fn main() {
         for (i, comm) in sub_comms.iter().enumerate() {
             let tokens = tokenize_comm(&comm);
 
-            if tokens[0] == "cd"  || tokens[0] == "exit" {
+            if tokens[0] == "cd" || tokens[0] == "exit" {
                 continue;
             }
 
