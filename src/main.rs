@@ -2,7 +2,6 @@ use libc::{c_int, signal, SIGINT};
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::{env, fs};
 
 static READ_MODE: AtomicBool = AtomicBool::new(false);
 static BLUE: &str = "\x1b[1;34m";
@@ -12,7 +11,7 @@ static RESET: &str = "\x1b[0m";
 fn get_prompt_string() -> String {
     let mut prompt: String = String::from(GREEN);
 
-    match env::var("USER") {
+    match std::env::var("USER") {
         Ok(user) => {
             prompt.push_str(&user);
             prompt.push('@');
@@ -23,7 +22,7 @@ fn get_prompt_string() -> String {
         }
     }
 
-    match fs::read_to_string("/proc/sys/kernel/hostname") {
+    match std::fs::read_to_string("/proc/sys/kernel/hostname") {
         Ok(hostname) => {
             prompt.push_str(hostname.trim());
             prompt.push(':');
@@ -36,7 +35,7 @@ fn get_prompt_string() -> String {
 
     prompt.push_str(BLUE);
 
-    match env::current_dir() {
+    match std::env::current_dir() {
         Ok(path) => {
             prompt.push_str(&path.to_string_lossy());
             prompt.push(' ');
